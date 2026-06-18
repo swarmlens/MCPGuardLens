@@ -1,0 +1,144 @@
+version: "3.9"
+
+# ═══════════════════════════════════════════════════════════════════
+#  MCPGuard — Local Development Stack
+#  © 2025 SwarmLens.com — Apache 2.0 License
+#
+#  Quick start:
+#    docker compose up -d
+#    python3 attack-sim/sim.py --attack all --gateway http://localhost:8080
+#
+#  Endpoints:
+#    Gateway   : http://localhost:8080   (no auth in dev mode)
+#    MCP server: http://localhost:3100   (mcp-everything)
+#    Grafana   : http://localhost:3001   (admin / mcpguard)
+#    ClickHouse: http://localhost:8123
+# ═══════════════════════════════════════════════════════════════════
+
+networks:
+  mcpguard:
+    driver: bridge
+
+volumes:
+  clickhouse-data:
+  grafana-data:
+
+services:
+
+  # ── 1. mcp-everything (real MCP test server) ─────────────────────
+  mcp-everything:
+    image: node:20-alpine
+    container_name: mcpguard-mcp-everything
+    restart: unless-stopped
+    ports:
+      - "3100:3000"
+    command: sh -c "npx -y @modelcontextprotocol/server-everything streamableHttp"
+    environment:
+      - PORT=3000
+    networks:
+      - mcpguard
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── 2. Gateway ───────────────────────────────────────────────────
+  gateway:
+    build:
+      context: ./gateway
+    container_name: mcpguard-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=development
+      - UPSTREAM_MCP=http://mcp-everything:3000
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_USER=mcpguard
+      - CLICKHOUSE_PASSWORD=mcpguard123
+      - RATE_LIMIT_MAX=30
+      - RATE_LIMIT_WINDOW=30
+      - BLOCK_PATTERNS=rm -rf,DROP TABLE,/etc/passwd,/etc/shadow,../
+      - GATEWAY_API_KEY=
+      - LOG_LEVEL=debug
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - mcpguard
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── 3. ClickHouse ────────────────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: mcpguard-clickhouse
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      - CLICKHOUSE_USER=mcpguard
+      - CLICKHOUSE_PASSWORD=mcpguard123
+      - CLICKHOUSE_DB=mcpguard
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - mcpguard
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # ── 4. Grafana ───────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: mcpguard-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=mcpguard
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/mcpguard.json
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - mcpguard
+
+  # ── 5. Attack simulator (on demand) ─────────────────────────────
+  attack-sim:
+    build:
+      context: ./attack-sim
+    container_name: mcpguard-attack-sim
+    environment:
+      - GATEWAY_URL=http://gateway:8080
+    depends_on:
+      - gateway
+    networks:
+      - mcpguard
+    profiles:
+      - test
+    restart: "no"

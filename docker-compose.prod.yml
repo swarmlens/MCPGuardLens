@@ -1,0 +1,211 @@
+ersion: "3.9"
+
+# ═══════════════════════════════════════════════════════════════════
+#  MCPGuard — Production Stack
+#  SSL handled by your existing nginx on the host.
+#
+#  Gateway  → nginx proxies https://v2.<yourdomain> → 127.0.0.1:8080
+#  Grafana  → nginx proxies https://grafana.v2.<yourdomain> → 127.0.0.1:3001
+#
+#  Start:   docker compose -f docker-compose.prod.yml up -d
+#  Rebuild: docker compose -f docker-compose.prod.yml up -d --build
+# ═══════════════════════════════════════════════════════════════════
+
+networks:
+  mcpguard:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  clickhouse-data:
+  grafana-data:
+
+services:
+
+  # ── 1. Gateway ──────────────────────────────────────────────────
+  gateway:
+    build:
+      context: ./gateway
+    container_name: mcpguard-gateway
+    restart: always
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - NODE_ENV=production
+      - UPSTREAM_MCP=${UPSTREAM_MCP:-https://v1.<yourdomain>}
+      - CLICKHOUSE_URL=http://clickhouse:8123
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-mcpguard}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - RATE_LIMIT_MAX=${RATE_LIMIT_MAX:-30}
+      - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-30}
+      - BLOCK_PATTERNS=${BLOCK_PATTERNS:-rm -rf,DROP TABLE,/etc/passwd,/etc/shadow,../}
+      - GATEWAY_API_KEY=${GATEWAY_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - mcpguard
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ── 2. ClickHouse ───────────────────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: mcpguard-clickhouse
+    restart: always
+    expose:
+      - "8123"
+      - "9000"
+    environment:
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-mcpguard}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+      - CLICKHOUSE_DB=${CLICKHOUSE_DB:-mcpguard}
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - mcpguard
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # ── 3. Grafana ───────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: mcpguard-grafana
+    restart: always
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/mcpguard.json
+      - GF_SERVER_ROOT_URL=https://${GRAFANA_DOMAIN:-grafana.v2.<yourdomain>}
+      - GF_SECURITY_COOKIE_SECURE=true
+      - GF_SECURITY_STRICT_TRANSPORT_SECURITY=true
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - mcpguard
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ── 4. GitHub MCP Server (optional) ─────────────────────────────
+  #    Only starts with: --profile github
+  #    Needs GITHUB_PAT in .env
+  #    To use: set UPSTREAM_MCP=http://mcp-github:3000 and restart gateway
+  mcp-github:
+    image: ghcr.io/github/github-mcp-server:latest
+    container_name: mcpguard-mcp-github
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - GITHUB_PERSONAL_ACCESS_TOKEN=${GITHUB_PAT:-}
+      - PORT=3000
+    networks:
+      - mcpguard
+    profiles:
+      - github
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── 5. MCP Inspector (optional) ─────────────────────────────────
+  #    Only starts with: --profile inspect
+  #    UI at http://127.0.0.1:6274
+  mcp-inspector:
+    image: ghcr.io/modelcontextprotocol/inspector:latest
+    container_name: mcpguard-mcp-inspector
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6274:6274"
+      - "127.0.0.1:6277:6277"
+    networks:
+      - mcpguard
+    profiles:
+      - inspect
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "2"
+
+  # ── 6. Attack simulator (test only) ─────────────────────────────
+  #    Never starts automatically.
+  #    Run: docker compose -f docker-compose.prod.yml --profile test run --rm attack-sim python sim.py --attack all
+  attack-sim:
+    build:
+      context: ./attack-sim
+    container_name: mcpguard-attack-sim
+    environment:
+      - GATEWAY_URL=http://gateway:8080
+    networks:
+      - mcpguard
+    profiles:
+      - test
+    restart: "no"

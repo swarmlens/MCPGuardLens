@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: MCPGuard
+    folder: MCPGuard
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

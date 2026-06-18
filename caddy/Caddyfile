@@ -1,0 +1,62 @@
+# MCPGuard Caddyfile
+# Caddy auto-provisions Let's Encrypt TLS certs for both domains.
+# Replace mcpguard.yourdomain.com with your actual domain (must match .env MCPGUARD_DOMAIN)
+
+# ── Gateway — agents connect here ────────────────────────────────
+mcpguard.yourdomain.com {
+    # Only allow requests with the API key header
+    @blocked not header X-MCPGuard-Key {env.GATEWAY_API_KEY}
+    respond @blocked 401
+
+    reverse_proxy gateway:8080 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        health_uri /health
+        health_interval 15s
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/gateway.log {
+            roll_size 50mb
+            roll_keep 5
+        }
+        format json
+    }
+}
+
+# ── Grafana — admin dashboard ─────────────────────────────────────
+grafana.yourdomain.com {
+    reverse_proxy grafana:3000 {
+        health_uri /api/health
+        health_interval 30s
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/grafana.log {
+            roll_size 20mb
+            roll_keep 3
+        }
+        format json
+    }
+}
+
+# ── Health check endpoint (for load balancers / uptime monitors) ──
+:80 {
+    respond /health 200
+}

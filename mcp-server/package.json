@@ -1,0 +1,13 @@
+{
+  "name": "mcpguard-test-server",
+  "version": "1.0.0",
+  "description": "Intentionally vulnerable MCP server for testing MCPGuard detection",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "uuid": "^9.0.0"
+  }
+}

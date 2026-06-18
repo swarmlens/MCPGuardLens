@@ -1,0 +1,25 @@
+<clickhouse>
+    <!-- Only listen on the internal Docker network, not 0.0.0.0 -->
+    <listen_host>0.0.0.0</listen_host>
+
+    <!-- Limit max memory usage to 1.5GB -->
+    <max_server_memory_usage_to_ram_ratio>0.75</max_server_memory_usage_to_ram_ratio>
+
+    <!-- Slow query log — anything over 1s gets logged -->
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </query_log>
+
+    <!-- Keep query log for 7 days only -->
+    <query_log_retention_size>0</query_log_retention_size>
+    <query_log_retention_time>604800</query_log_retention_time>
+
+    <!-- Compression -->
+    <compression>
+        <case>
+            <method>lz4</method>
+        </case>
+    </compression>
+</clickhouse>
