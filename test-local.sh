@@ -1,7 +1,7 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════
 #  MCPGuard — Local Quick Test Script
-#  © 2025 SwarmLens.com — Apache 2.0 License
+#  © 2026 SwarmLens.com — Apache 2.0 License
 #
 #  Runs the full local stack and verifies every detection layer.
 #  Usage: bash test-local.sh

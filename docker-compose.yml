@@ -2,7 +2,7 @@ version: "3.9"
 
 # ═══════════════════════════════════════════════════════════════════
 #  MCPGuard — Local Development Stack
-#  © 2025 SwarmLens.com — Apache 2.0 License
+#  © 2026 SwarmLens.com — Apache 2.0 License
 #
 #  Quick start:
 #    docker compose up -d

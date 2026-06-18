@@ -294,7 +294,7 @@ PRs are welcome. When contributing:
 
 ## 📄 License
 
-Copyright © 2025 **[SwarmLens.com](https://swarmlens.com)**
+Copyright © 2026 **[SwarmLens.com](https://swarmlens.com)**
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
 

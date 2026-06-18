@@ -1,6 +1,6 @@
 <!--
   MCPGuard — Production Deployment Guide
-  © 2025 SwarmLens.com — Apache 2.0 License
+  © 2026 SwarmLens.com — Apache 2.0 License
 -->
 
 # MCPGuard — Production Deployment
